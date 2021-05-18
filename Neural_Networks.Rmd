@@ -1,0 +1,345 @@
+---
+title: "Artificial Neural Network"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Using ANN for Classifying News Articles
+
+Using a feedforward artificial neural network to classify Reuters news into 46 different topics/classes.\
+
+```{r}
+library(keras)
+
+reuters <- dataset_reuters(num_words = 10000)
+
+one_hot_encoding <- function(x, dimension = 10000) {
+  encoded <- matrix(0, length(x), dimension)
+  for (i in 1:length(x))
+    encoded[i, x[[i]]] = 1
+  encoded
+}
+
+train_x <- one_hot_encoding(reuters$train$x)
+test_x <- one_hot_encoding(reuters$test$x)
+
+train_y <- to_categorical(reuters$train$y)
+test_y <- to_categorical(reuters$test$y)
+```
+
+**Creating an ANN model to classify the Reuters news article into 46 classes using at least two hidden layers and computing the accuracy of the model on the test set.**
+
+```{r}
+model <- keras_model_sequential() 
+model %>%
+  layer_dense(units = 64, activation = "relu", input_shape = c(10000)) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 46, activation = "softmax")
+
+model %>% compile(
+  optimizer = 'adam',
+  loss = 'categorical_crossentropy',
+  metric = c('accuracy'))
+
+model %>% evaluate(test_x, test_y)
+```
+
+**Split the train data into train/validation set. Use the first 1000 examples in reuters$train for validation and the rest for training the model. Use "tfruns" to tune the ANN's hyper-paramaters - Validate each model on the validation set.**
+
+```{r}
+library(tfruns)
+
+split_index <- 1:1000
+
+validation_split_x <- train_x[split_index,]
+training_split_x <- train_x[-split_index,]
+
+validation_split_y <- train_y[split_index,]
+training_split_y <- train_y[-split_index,]
+
+set.seed(111)
+
+model %>% fit(
+    training_split_x,
+    training_split_y,
+    epochs = 20,
+    batch_size = 100,
+    validation_data = list(validation_split_x, validation_split_y)
+)
+
+model %>% evaluate(test_x, test_y)
+```
+```
+runs <- tuning_run("reuters.R",
+                   flags = list(
+                     nodes = c(64, 128, 392),
+                     learning_rate = c(0.01, 0.05, 0.001, 0.0001),
+                     batch_size = c(100, 200, 500, 1000),
+                     epochs = c(30, 50, 100),
+                     activation = c("relu", "sigmoid", "tanh")),
+                     sample = 0.2
+                   )
+                   
+runs
+view_run(runs$run_dir[1])
+```
+The run with the highest validation accuracy had 64 neurons, with sigmoid activation function, was trained with 100 epochs and a learning rate of 0.001 and batch size of 200.\
+
+* loss: 0.0581 \
+* accuracy: 0.9609 \
+* validation loss: 1.0969 \
+* validation accuracy: 0.7990 \
+
+The best model still overfits. The accuracy of the training set is better than the accuracy of the validation set. The validation error is higher than the training error. The validation loss stops decreasing rapidly at about epoch 10, leveling off around epoch 30, and begins rising slightly around epoch 37.\
+
+**Use all of the training data in reuters$train to train an ANN with the best hyper-parameter combination and compute the accuracy of the model on the test set.**
+
+```{r}
+tuned_model <- keras_model_sequential() %>%
+  layer_dense(units = 64, activation = "sigmoid", input_shape = c(10000)) %>%
+  layer_dense(units = 64, activation = "sigmoid") %>%
+  layer_dense(units = 46, activation = "softmax")
+
+tuned_model %>% compile(
+  optimizer = 'adam',
+  loss = 'categorical_crossentropy',
+  metric = c('accuracy'))
+
+tuned_model %>% fit(
+    train_x,
+    train_y,
+    epochs = 100,
+    batch_size = 200,
+    validation_data = list(validation_split_x, validation_split_y)
+)
+
+tuned_model %>% evaluate(test_x, test_y)
+```
+
+## Predicting Baseball Player's Salaries
+
+
+```{r}
+baseball <- read.csv("hitters.csv", header = TRUE)
+str(baseball)
+summary(baseball)
+```
+
+There are 322 observations. Out of 20 variables, 3 are categorical and the remaining 17 are numeric. There are 59 missing values - all within the 'Salary' variable.\
+
+The histogram for 'Salary' is right-skewed and tending toward a unimodal distribution. There are outliers that are greater than the mode of the data.\
+```{r}
+hist(baseball$Salary)
+```
+
+**Remove the obs in which 'Salary' is missing.**
+
+```{r}
+baseball <- na.omit(baseball)
+sum(is.na(baseball))
+```
+
+**Which predictors have the most correlation with 'Salary'? **
+
+Numeric:\
+* AtBat: There does not appear to be correlation. \
+* Hits: There does not appear to be correlation, or it is very weak.\
+* HmRun: There does not appear to be correlation.\
+* Runs: There does not appear to be correlation, or it is very weak.\
+* RBI: There does not appear to be correlation, or it is very weak.\
+* Walks: There does not appear to be correlation, or it is very weak.\
+* Years: There appears to be slight correlation.\
+* CAtBat: There appears to be slight correlation.\
+* CHits: There appears to be slight correlation.\
+* CHmRun: There appears to be slight correlation.\
+* CRuns: There appears to be slight correlation.\
+* CRBI: There appears to be slight correlation.\
+* CWalks: There appears to be slight correlation.\
+* PutOuts: There does not appear to be correlation.\
+* Assists: There does not appear to be correlation.\
+* Errors: There does not appear to be correlation.\
+
+Categorical:\
+* League: The p-value is 0.8171, therefore I do not see a correlation.\
+* Division: The p-value is 0.001892, therefore I do see a correlation. \
+* NewLeague: The p-value is 0.9634, therefore I do not see a correlation. \
+
+```
+numeric_attributes <- baseball[, c("AtBat", "Hits", "HmRun", "Runs", "RBI", "Walks", "Years", "CAtBat", "CHits", "CHmRun", "CRuns", "CRBI", "CWalks", "PutOuts", "Assists", "Errors", "Salary")]
+cor(numeric_attributes)
+
+plot(baseball$Salary, baseball$AtBat)
+plot(baseball$Salary, baseball$Hits)
+plot(baseball$Salary, baseball$HmRun)
+plot(baseball$Salary, baseball$Runs)
+plot(baseball$Salary, baseball$RBI)
+plot(baseball$Salary, baseball$Walks)
+plot(baseball$Salary, baseball$Years)
+plot(baseball$Salary, baseball$CAtBat)
+plot(baseball$Salary, baseball$CHits)
+plot(baseball$Salary, baseball$CHmRun)
+plot(baseball$Salary, baseball$CRuns)
+plot(baseball$Salary, baseball$CRBI)
+plot(baseball$Salary, baseball$CWalks)
+plot(baseball$Salary, baseball$PutOuts)
+plot(baseball$Salary, baseball$Assists)
+plot(baseball$Salary, baseball$Errors)
+
+boxplot(baseball$Salary ~ baseball$League)
+t.test(baseball$Salary ~ baseball$League)
+boxplot(baseball$Salary ~ baseball$Division)
+t.test(baseball$Salary ~ baseball$Division)
+boxplot(baseball$Salary ~ baseball$NewLeague)
+t.test(baseball$Salary ~ baseball$NewLeague)
+```
+
+```{r}
+set.seed(1)
+```
+
+**Use Caret's "createDataPartition" method to partition the dataset into hitters_train (90%) & hitters_test (10%):**
+```{r}
+library(caret)
+
+inTrain <- createDataPartition(baseball$Salary, p=0.9, list=FALSE)
+baseball_train <- baseball[inTrain, ]
+baseball_test <- baseball[-inTrain, ]
+```
+
+**Neural networks do not accept categorical variables. Use ifelse to convert the binary categorical variables to a numeric variable of 0/1:**
+```{r}
+baseball_train$League <- ifelse(baseball_train$League == "N", 1, 0)
+baseball_train$Division <- ifelse(baseball_train$Division == "W", 1, 0)
+baseball_train$NewLeague <- ifelse(baseball_train$NewLeague == "N", 1, 0)
+
+baseball_test$League <- ifelse(baseball_test$League == "N", 1, 0)
+baseball_test$Division <- ifelse(baseball_test$Division == "W", 1, 0)
+baseball_test$NewLeague <- ifelse(baseball_test$NewLeague == "N", 1, 0)
+
+baseball_train$Salary <- log(baseball_train$Salary)
+```
+
+**Set seed and further divide the train data into 90% training and 10% validation:**
+```{r}
+set.seed(1)
+
+sTrain <- createDataPartition(baseball_train$Salary, p=0.9, list=FALSE)
+split_train <- baseball_train[sTrain, ]
+split_val <- baseball_train[-sTrain, ]
+```
+
+**Scale the numeric attributes in the training data (except for 'Salary' & dummy variables):**
+```{r}
+library(tidyverse)
+
+x_train <- split_train %>%
+    select(-Salary, -League, -Division, -NewLeague) %>%
+    scale()
+col_mean_train <- attr(x_train, "scaled:center")
+col_stddevs_train <- attr(x_train, "scaled:scale")
+
+train_col <- split_train[,c(14,15,20)]
+x_train <- cbind(as.data.frame(x_train), train_col)
+
+y_train <- split_train$Salary
+
+x_val <- split_val %>%
+    select(-Salary, -League, -Division, -NewLeague) %>%
+    scale()
+val_col <- split_val[,c(14,15,20)]
+x_val <- cbind(as.data.frame(x_val), val_col)
+
+y_val <- split_val$Salary
+```
+**Create an ANN model to predict log(Salary) from the other attributes:**
+
+The best hyper-parameter combination was the 2nd run: 10 nodes, 100 epochs, and 50 batch size. It very slightly overfits, because the training set runs better than the validation set. It continues to decrease slightly, but mostly levels off at the 17th epoch.\
+
+* loss: 0.1344\
+* mean absolute error: 0.2801\
+* validation loss: 0.2301 \
+* validation mean absolute error: 0.3884\
+
+```{r}
+bb_model <- keras_model_sequential() %>%
+    layer_dense(units = 10, activation = "relu", input_shape = ncol(x_train)) %>%
+    layer_dense(units = 10) %>%
+    layer_dense(units = 1)
+
+bb_model %>% compile(
+    optimizer = 'sgd',
+    loss = 'mse',
+    metric = list('mean_absolute_error'))
+
+set.seed(1)
+
+bb_model %>% fit(
+    as.matrix(x_train),
+    y_train,
+    epochs = 100,
+    batch_size = 50,
+    validation_data = list(as.matrix(x_val), y_val)
+)
+
+```
+```
+bb_runs <- tuning_run("baseball.R",
+                   flags = list(
+                       nodes = c(5, 10, 20),
+                       learning_rate = c(0.01, 0.05, 0.001, 0.0001),
+                       batch_size = c(30, 50, 100, 200),
+                       epochs = c(20, 30, 50, 100),
+                       activation = c("relu")),
+                   sample = 0.2
+)
+
+bb_runs
+View(bb_runs)
+```
+
+**10. Measure the performance of your best model (after tuning) on the test set and compute RMSE.**
+
+```{r}
+set.seed(1)
+
+x_test <- baseball_test %>%
+    select(-Salary, -League, -Division, -NewLeague) %>%
+    scale(center = col_mean_train, scale = col_stddevs_train)
+
+test_col <- baseball_test[,c(14,15,20)]
+x_test <- cbind(as.data.frame(x_test), test_col)
+test_matrix <- as.matrix(x_test)
+
+set.seed(1)
+predictions <- bb_model %>% predict(test_matrix)
+rmse <- function(x, y) { return((mean((x-y)^2))^0.5) }
+rmse(exp(predictions), baseball_test$Salary)
+```
+
+**11. Use a linear regression model to predict the salary using the same data used for the ANN and compare the RMSE of each: **
+
+The ANN does a better job of predicting salary than the linear regression models (linear & stepwise). The ANN has an error that is significantly less than the regression models ($744 error).\
+
+```{r}
+library(leaps)
+
+set.seed(1)
+
+train.control <- trainControl(method = "cv", number = 10)
+lr_model <- train(Salary~., data = baseball_train, method = "lm", trControl = train.control)
+print(lr_model)
+summary(lr_model)
+
+predict_lr_test <- predict(lr_model, newdata = baseball_test)
+rmse(baseball_test$Salary, predict_lr_test)
+
+set.seed(1)
+step.model <- train(Salary~., data = baseball_train, method = "leapBackward", trControl = train.control, tuneGrid = data.frame(nvmax = 1:20))
+print(step.model)
+summary(step.model$finalModel)
+
+step_bb_test <- predict(step.model, newdata = baseball_test)
+rmse(baseball_test$Salary, step_bb_test)
+```
+
